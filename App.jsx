@@ -1,13 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 
-const BIRD_SIZE = 84;
-const BIRD_X = 90;
-
 const GRAVITY = 1798;
 const JUMP_FORCE = -520;
 
-const OBSTACLE_WIDTH = 78;
-const GAP_SIZE = 220;
 const OBSTACLE_SPEED = 190;
 const SPAWN_INTERVAL = 1.45;
 const INITIAL_SPAWN_PROGRESS = 1.05;
@@ -20,6 +15,19 @@ const getViewportSize = () => ({
   width: window.innerWidth,
   height: window.innerHeight,
 });
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const getGameMetrics = (gameWidth, gameHeight) => {
+  const mobile = gameWidth <= 768;
+  const birdSize = mobile ? clamp(Math.round(gameWidth * 0.16), 56, 78) : 84;
+  const birdX = clamp(Math.round(gameWidth * 0.22), 58, 120);
+  const obstacleWidth = mobile ? clamp(Math.round(gameWidth * 0.15), 54, 74) : 78;
+  const gapSize = mobile ? clamp(Math.round(gameHeight * 0.34), 210, 300) : 220;
+  const gravity = mobile ? GRAVITY * 0.72 : GRAVITY;
+  const obstacleSpeed = mobile ? OBSTACLE_SPEED * 0.82 : OBSTACLE_SPEED;
+  return { birdSize, birdX, obstacleWidth, gapSize, gravity, obstacleSpeed };
+};
 
 const makeInitialGameState = (gameHeight, gameWidth) => ({
   started: false,
@@ -67,6 +75,7 @@ export default function App({
 
   const collisionAudioRef = useRef(null);
   const collisionPlayedRef = useRef(false);
+  const audioUnlockedRef = useRef(false);
 
   useEffect(() => {
     gameRef.current = game;
@@ -118,6 +127,35 @@ export default function App({
     audio.play().catch(() => {});
   };
 
+  const unlockCollisionAudio = () => {
+    if (audioUnlockedRef.current) return;
+    const audio = collisionAudioRef.current;
+    if (!audio) return;
+
+    audio.volume = 0;
+    audio.currentTime = 0;
+    const maybePromise = audio.play();
+
+    if (maybePromise && typeof maybePromise.then === "function") {
+      maybePromise
+        .then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.volume = 1;
+          audioUnlockedRef.current = true;
+        })
+        .catch(() => {
+          audio.volume = 1;
+        });
+      return;
+    }
+
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = 1;
+    audioUnlockedRef.current = true;
+  };
+
   const startFromIdle = (withJump = true) => {
     collisionPlayedRef.current = false;
     const { width, height } = getViewportSize();
@@ -148,13 +186,10 @@ export default function App({
   };
 
   const jump = () => {
+    unlockCollisionAudio();
     const g = gameRef.current;
     if (!g.started) {
       startFromIdle(true);
-      return;
-    }
-    if (g.gameOver) {
-      restartGame();
       return;
     }
     if (!g.running) return;
@@ -165,9 +200,11 @@ export default function App({
     const onKeyDown = (e) => {
       if (e.code === "Space") {
         e.preventDefault();
+        unlockCollisionAudio();
         jump();
       } else if (e.code === "KeyR") {
         e.preventDefault();
+        unlockCollisionAudio();
         restartGame();
       }
     };
@@ -187,12 +224,14 @@ export default function App({
       if (g.running) {
         const gameWidth = g.gameWidth;
         const gameHeight = g.gameHeight;
-        const birdVY = g.birdVY + GRAVITY * dt;
+        const { birdSize, birdX, obstacleWidth, gapSize, gravity, obstacleSpeed } =
+          getGameMetrics(gameWidth, gameHeight);
+        const birdVY = g.birdVY + gravity * dt;
         const birdYRaw = g.birdY + birdVY * dt;
-        const birdY = Math.max(0, Math.min(gameHeight - BIRD_SIZE, birdYRaw));
+        const birdY = Math.max(0, Math.min(gameHeight - birdSize, birdYRaw));
 
         let spawnTimer = g.spawnTimer + dt;
-        let obstacles = g.obstacles.map((o) => ({ ...o, x: o.x - OBSTACLE_SPEED * dt }));
+        let obstacles = g.obstacles.map((o) => ({ ...o, x: o.x - obstacleSpeed * dt }));
 
         if (spawnTimer >= SPAWN_INTERVAL) {
           spawnTimer = 0;
@@ -204,26 +243,26 @@ export default function App({
           });
         }
 
-        obstacles = obstacles.filter((o) => o.x + OBSTACLE_WIDTH > -20);
+        obstacles = obstacles.filter((o) => o.x + obstacleWidth > -20);
 
         let score = g.score;
         for (const o of obstacles) {
-          if (!o.passed && o.x + OBSTACLE_WIDTH < BIRD_X) {
+          if (!o.passed && o.x + obstacleWidth < birdX) {
             o.passed = true;
             score += 1;
           }
         }
 
-        const birdRect = { x: BIRD_X, y: birdY, w: BIRD_SIZE, h: BIRD_SIZE };
-        let hit = birdY <= 0 || birdY + BIRD_SIZE >= gameHeight;
+        const birdRect = { x: birdX, y: birdY, w: birdSize, h: birdSize };
+        let hit = birdY <= 0 || birdY + birdSize >= gameHeight;
 
         for (const o of obstacles) {
-          const topH = Math.max(0, o.gapY - GAP_SIZE / 2);
-          const bottomY = o.gapY + GAP_SIZE / 2;
+          const topH = Math.max(0, o.gapY - gapSize / 2);
+          const bottomY = o.gapY + gapSize / 2;
           const bottomH = Math.max(0, gameHeight - bottomY);
 
-          const topRect = { x: o.x, y: 0, w: OBSTACLE_WIDTH, h: topH };
-          const bottomRect = { x: o.x, y: bottomY, w: OBSTACLE_WIDTH, h: bottomH };
+          const topRect = { x: o.x, y: 0, w: obstacleWidth, h: topH };
+          const bottomRect = { x: o.x, y: bottomY, w: obstacleWidth, h: bottomH };
 
           if (intersects(birdRect, topRect) || intersects(birdRect, bottomRect)) {
             hit = true;
@@ -274,6 +313,7 @@ export default function App({
   }, [highScore]);
 
   const birdTilt = Math.max(-25, Math.min(55, game.birdVY * 0.06));
+  const { birdSize, birdX, obstacleWidth, gapSize } = getGameMetrics(game.gameWidth, game.gameHeight);
 
   return (
     <>
@@ -307,7 +347,7 @@ export default function App({
         }
         .score {
           position: absolute;
-          top: 10px;
+          top: calc(env(safe-area-inset-top, 0px) + 8px);
           left: 50%;
           transform: translateX(-50%);
           z-index: 20;
@@ -319,7 +359,7 @@ export default function App({
         }
         .high-score {
           position: absolute;
-          top: 52px;
+          top: calc(env(safe-area-inset-top, 0px) + 48px);
           left: 50%;
           transform: translateX(-50%);
           z-index: 20;
@@ -330,8 +370,8 @@ export default function App({
         }
         .bird {
           position: absolute;
-          width: ${BIRD_SIZE}px;
-          height: ${BIRD_SIZE}px;
+          width: ${birdSize}px;
+          height: ${birdSize}px;
           object-fit: contain;
           z-index: 12;
           border: 2px solid rgba(255, 255, 255, 0.95);
@@ -342,7 +382,7 @@ export default function App({
         }
         .obstacle {
           position: absolute;
-          width: ${OBSTACLE_WIDTH}px;
+          width: ${obstacleWidth}px;
           object-fit: cover;
           z-index: 10;
           pointer-events: none;
@@ -415,6 +455,30 @@ export default function App({
           border-top: 2px solid rgba(255,255,255,0.45);
           z-index: 14;
         }
+        @media (max-width: 768px) {
+          .score {
+            font-size: 28px;
+          }
+          .high-score {
+            top: calc(env(safe-area-inset-top, 0px) + 42px);
+            font-size: 13px;
+          }
+          .panel {
+            width: min(360px, 92%);
+            padding: 16px 14px;
+          }
+          .title {
+            font-size: 26px;
+          }
+          .msg {
+            font-size: 14px;
+            line-height: 1.35;
+          }
+          .restart-btn {
+            padding: 12px 14px;
+            font-size: 16px;
+          }
+        }
       `}</style>
 
       <div
@@ -439,8 +503,8 @@ export default function App({
         <div className="high-score">High Score: {highScore}</div>
 
         {game.obstacles.map((o) => {
-          const topHeight = Math.max(0, o.gapY - GAP_SIZE / 2);
-          const bottomY = o.gapY + GAP_SIZE / 2;
+          const topHeight = Math.max(0, o.gapY - gapSize / 2);
+          const bottomY = o.gapY + gapSize / 2;
           const bottomHeight = Math.max(0, game.gameHeight - bottomY);
           const topObstacleSrc = obstacleTopImage || obstacleImage;
           const bottomObstacleSrc = obstacleBottomImage || obstacleImage;
@@ -482,7 +546,7 @@ export default function App({
           alt="bird"
           draggable="false"
           style={{
-            left: BIRD_X,
+            left: birdX,
             top: game.birdY,
             transform: `rotate(${birdTilt}deg)`,
           }}
@@ -506,7 +570,7 @@ export default function App({
               <h1 className="title">Game Over</h1>
               <p className="msg">Score: {game.score}</p>
               <p className="msg">High Score: {highScore}</p>
-              <p className="msg">Tap screen or use button to restart</p>
+              <p className="msg">Use the button to restart</p>
               <button
                 type="button"
                 className="restart-btn"
@@ -514,6 +578,7 @@ export default function App({
                 onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
+                  unlockCollisionAudio();
                   restartGame();
                 }}
               >
