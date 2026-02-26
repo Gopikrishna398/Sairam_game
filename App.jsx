@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 const BIRD_SIZE = 84;
 const BIRD_X = 90;
 
-const GRAVITY = 1799;
+const GRAVITY = 1798;
 const JUMP_FORCE = -520;
 
 const OBSTACLE_WIDTH = 78;
@@ -153,6 +153,10 @@ export default function App({
       startFromIdle(true);
       return;
     }
+    if (g.gameOver) {
+      restartGame();
+      return;
+    }
     if (!g.running) return;
     safeSetGame((prev) => ({ ...prev, birdVY: JUMP_FORCE }));
   };
@@ -211,7 +215,7 @@ export default function App({
         }
 
         const birdRect = { x: BIRD_X, y: birdY, w: BIRD_SIZE, h: BIRD_SIZE };
-        let hit = false;
+        let hit = birdY <= 0 || birdY + BIRD_SIZE >= gameHeight;
 
         for (const o of obstacles) {
           const topH = Math.max(0, o.gapY - GAP_SIZE / 2);
@@ -384,6 +388,18 @@ export default function App({
           opacity: 0.95;
           line-height: 1.4;
         }
+        .restart-btn {
+          margin-top: 12px;
+          width: 100%;
+          padding: 10px 12px;
+          border: 0;
+          border-radius: 10px;
+          background: #ffffff;
+          color: #0b2a45;
+          font-size: 15px;
+          font-weight: 800;
+          cursor: pointer;
+        }
         .ground {
           position: absolute;
           left: 0;
@@ -490,7 +506,19 @@ export default function App({
               <h1 className="title">Game Over</h1>
               <p className="msg">Score: {game.score}</p>
               <p className="msg">High Score: {highScore}</p>
-              <p className="msg">Press R to Restart</p>
+              <p className="msg">Tap screen or use button to restart</p>
+              <button
+                type="button"
+                className="restart-btn"
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  restartGame();
+                }}
+              >
+                Restart
+              </button>
             </div>
           </div>
         )}
